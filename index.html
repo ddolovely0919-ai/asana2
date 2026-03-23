@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Asana 제작 물량 통합 트래킹 (MadUp DB)</title>
+    <title>제작 물량 통합 트래킹 (MadUp DB)</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -26,7 +26,7 @@
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 13px; }
         th { background: #f8f9fc; color: var(--primary); font-weight: 700; white-space: nowrap; }
         .badge { display: inline-block; padding: 4px 8px; border-radius: 5px; background: #eef2ff; color: var(--primary); font-weight: bold; }
-        #status { font-weight: bold; margin-top: 15px; padding: 10px; border-radius: 8px; background: #fff; border: 1px solid #eee; font-size: 14px; }
+        #status { font-weight: bold; margin-top: 15px; padding: 10px; border-radius: 8px; background: #fff; border: 1px solid #eee; font-size: 14px; min-height: 20px; }
     </style>
 </head>
 <body>
@@ -37,7 +37,7 @@
         <div class="config-grid">
             <div class="filter-inputs">
                 <div class="input-group"><label>팀 필터</label><select id="teamSelect" onchange="processAndRender()"><option value="all">전체 팀</option></select></div>
-                <div class="input-group"><label>캠페인 필터</label><select id="campaignSelect" onchange="processAndRender()"><option value="all">전체 캠페인</option></select></div>
+                <div class="input-group"><label>캠페인 필터</label><select id="campaignSelect" onchange="processAndRender()"><option value="all">전체 캠페인 보기</option></select></div>
                 <div class="input-group"><label>시작일</label><input type="date" id="startDate" onchange="processAndRender()"></div>
                 <div class="input-group"><label>종료일</label><input type="date" id="endDate" onchange="processAndRender()"></div>
             </div>
@@ -46,17 +46,17 @@
                 <button class="btn-excel" onclick="exportToExcel()">📥 Excel 다운로드</button>
             </div>
         </div>
-        <div id="status">연동 대기 중...</div>
+        <div id="status">연동 정보를 확인 중입니다...</div>
     </div>
 
     <div class="dashboard-row">
         <div class="card">
-            <h2>📈 제작 요청 추이 (Hover 시 캠페인/담당자 상세)</h2>
+            <h2>📈 제작 요청 추이</h2>
             <div class="chart-container"><canvas id="dailyChart"></canvas></div>
         </div>
         <div class="card">
             <h2>🏢 팀별 제작 요약</h2>
-            <table><thead><tr><th>팀명</th><th>제작 건수</th></tr></thead><tbody id="teamTableBody"></tbody></table>
+            <table><thead><tr><th>팀명</th><th>건수</th></tr></thead><tbody id="teamTableBody"></tbody></table>
         </div>
     </div>
 
@@ -82,53 +82,69 @@
 
 <script>
 Chart.register(ChartDataLabels);
-const SHEET_ID = '1lx3nUPiUlBXcZAOktrTQ87Dm0amoQw1O-iVvBAGGiN4';
+// 💡 시트 ID 확인 필수: 1lx3nUPiUlBXcZAOktrTQ87Dm0amoQw1O-iVvBAGGiN4
+const SHEET_ID = '1lx3nUPiUlBXcZAOktrTQ87Dm0amoQw1O-iVvBAGGiN4'; 
 let allRawData = [];
 let dailyChart;
 let dailyDetails = {};
 
 window.onload = () => {
-    const now = new Date();
-    // 기본 범위를 2월 1일부터로 설정 (데이터 확인용)
     document.getElementById('startDate').value = "2026-02-01";
-    document.getElementById('endDate').value = now.toISOString().split('T')[0];
+    document.getElementById('endDate').value = new Date().toISOString().split('T')[0];
     loadSheetData();
 };
 
 async function loadSheetData() {
     const statusEl = document.getElementById('status');
-    statusEl.innerText = "📡 시트 DB 연결 중...";
+    statusEl.innerText = "📡 데이터를 긁어오는 중...";
+    statusEl.style.color = "#4e73df";
+
+    // 구글 시트 JSON 엔드포인트
     const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=0`;
 
     try {
         const res = await fetch(url);
         const text = await res.text();
-        const json = JSON.parse(text.substring(47).slice(0, -2));
-        const rows = json.table.rows;
+        
+        // 구글 응답 텍스트 파싱
+        const match = text.match(/google\.visualization\.Query\.setResponse\((.*)\);/);
+        if (!match) {
+            throw new Error("데이터 형식을 읽을 수 없습니다. '웹에 게시' 설정을 확인하세요.");
+        }
 
-        // 이미지 구조에 기반한 컬럼 매핑 (0:팀, 4:테스크명, 5:담당자, 6:태그, 7:링크)
+        const json = JSON.parse(match[1]);
+        if (json.status === "error") {
+            throw new Error("구글 시트 오류: " + json.errors[0].detailed_message);
+        }
+
+        const rows = json.table.rows;
         allRawData = rows.map(r => {
-            if (!r.c || !r.c[4]) return null;
+            if (!r.c || !r.c[4] || !r.c[4].v) return null;
             const fullTaskName = String(r.c[4].v);
-            const match = fullTaskName.match(/^(\d{6})/);
-            if (!match) return null;
+            const dateMatch = fullTaskName.match(/^(\d{6})/);
+            if (!dateMatch) return null;
 
             return {
                 team: r.c[0] ? String(r.c[0].v) : "미지정",
-                dateRaw: match[1],
+                dateRaw: dateMatch[1],
                 taskName: fullTaskName,
                 assignee: r.c[5] ? String(r.c[5].v) : "미지정",
-                campaign: r.c[6] ? String(r.c[6].v) : "기타",
-                link: r.c[7] ? String(r.c[7].v) : "#"
+                campaign: r.c[6] ? String(r.c[6].v) : "기타"
             };
         }).filter(item => item !== null);
 
+        if (allRawData.length === 0) {
+            throw new Error("동기화는 성공했으나 유효한 데이터(YYMMDD 형식)가 없습니다.");
+        }
+
         updateFilters();
         statusEl.innerText = `✅ 동기화 완료 (${allRawData.length}건 로드됨)`;
+        statusEl.style.color = "#1cc88a";
         processAndRender();
     } catch (e) {
-        statusEl.innerText = "❌ 오류: 시트 공유 설정을 확인하세요.";
-        console.error(e);
+        statusEl.innerText = `❌ 오류: ${e.message}`;
+        statusEl.style.color = "#e74a3b";
+        console.error("Debug Details:", e);
     }
 }
 
@@ -137,12 +153,7 @@ function updateFilters() {
     const cSel = document.getElementById('campaignSelect');
     const teams = new Set();
     const camps = new Set();
-    
-    allRawData.forEach(d => {
-        teams.add(d.team);
-        camps.add(d.campaign);
-    });
-
+    allRawData.forEach(d => { teams.add(d.team); camps.add(d.campaign); });
     tSel.innerHTML = '<option value="all">전체 팀</option>';
     Array.from(teams).sort().forEach(t => tSel.innerHTML += `<option value="${t}">${t}</option>`);
     cSel.innerHTML = '<option value="all">전체 캠페인 보기</option>';
@@ -167,8 +178,6 @@ function processAndRender() {
 
         const dKey = dObj.toISOString().split('T')[0];
         daily[dKey] = (daily[dKey] || 0) + 1;
-        
-        // Hover용 상세 정보 (담당자 및 캠페인)
         if (!dailyDetails[dKey]) dailyDetails[dKey] = {};
         const detailKey = `${item.campaign} (${item.assignee})`;
         dailyDetails[dKey][detailKey] = (dailyDetails[dKey][detailKey] || 0) + 1;
@@ -178,7 +187,6 @@ function processAndRender() {
         if (!campStats[item.campaign]) campStats[item.campaign] = { t:0, m:0, k:0, y:0, g:0, n:0, e:0 };
         const s = campStats[item.campaign];
         s.t++;
-        
         const txt = item.taskName.toLowerCase();
         if (txt.includes('메타') || txt.includes('meta')) s.m++;
         else if (txt.includes('카카오') || txt.includes('kakao')) s.k++;
@@ -194,30 +202,10 @@ function processAndRender() {
 function renderUI(daily, teams, camps) {
     if (dailyChart) dailyChart.destroy();
     const lbls = Object.keys(daily).sort();
-    
     dailyChart = new Chart(document.getElementById('dailyChart'), {
         type: 'line',
         data: { labels: lbls, datasets: [{ label: '제작 건수', data: lbls.map(l => daily[l]), borderColor: '#4e73df', backgroundColor: 'rgba(78, 115, 223, 0.1)', fill: true, tension: 0.1 }] },
-        options: {
-            maintainAspectRatio: false,
-            plugins: {
-                datalabels: { display: true, align: 'top', font: { weight: 'bold' } },
-                tooltip: {
-                    callbacks: {
-                        footer: (tooltipItems) => {
-                            const date = tooltipItems[0].label;
-                            const details = dailyDetails[date];
-                            if (!details) return '';
-                            let text = '\n[상세 내역 (캠페인 및 담당자)]\n';
-                            Object.entries(details).sort((a,b) => b[1]-a[1]).slice(0, 10).forEach(([key, count]) => {
-                                text += `• ${key}: ${count}건\n`;
-                            });
-                            return text;
-                        }
-                    }
-                }
-            }
-        }
+        options: { maintainAspectRatio: false, plugins: { datalabels: { display: true, align: 'top' } } }
     });
 
     const tBody = document.getElementById('teamTableBody');
