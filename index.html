@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MadUp 제작 통합 대시보드 PRO</title>
+    <title>MadUp 제작 통합 대시보드 PRO (생산성 지표 포함)</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
-        :root { --primary: #4e73df; --bg: #f4f7fc; --card: #ffffff; --excel: #1d6f42; --subtotal: #f8f9fc; }
+        :root { --primary: #4e73df; --bg: #f4f7fc; --card: #ffffff; --excel: #1d6f42; --subtotal: #f8f9fc; --accent: #e74a3b; }
         body { font-family: 'Pretendard', sans-serif; background: var(--bg); margin: 0; padding: 20px; color: #333; }
         .container { max-width: 1550px; margin: auto; }
         .card { background: var(--card); padding: 25px; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.05); margin-bottom: 25px; }
@@ -27,6 +27,7 @@
         th { background: #f8f9fc; color: var(--primary); font-weight: 700; white-space: nowrap; }
         .subtotal-row { background-color: var(--subtotal); font-weight: bold; color: #444; }
         .badge { display: inline-block; padding: 4px 8px; border-radius: 5px; background: #eef2ff; color: var(--primary); font-weight: bold; }
+        .avg-badge { background: #fff1f0; color: var(--accent); }
         #status { font-weight: bold; margin-top: 15px; padding: 12px; border-radius: 8px; background: #fff; border: 1px solid #eee; font-size: 14px; }
     </style>
 </head>
@@ -34,7 +35,7 @@
 
 <div class="container">
     <div class="card">
-        <h2 style="margin-top:0;">📊 제작 물량 통합 트래킹 (담당자별 리포트 강화)</h2>
+        <h2 style="margin-top:0;">📊 제작 물량 통합 트래킹 (MadUp DB)</h2>
         <div class="config-grid">
             <div class="filter-inputs">
                 <div class="input-group"><label>팀 필터</label><select id="teamSelect" onchange="processAndRender()"><option value="all">전체 팀 보기</option></select></div>
@@ -72,19 +73,29 @@
     </div>
 
     <div class="card">
+        <h2>📈 팀별 제작 효율 (인당 평균 제작량)</h2>
+        <table id="averageTable">
+            <thead>
+                <tr>
+                    <th>팀명</th>
+                    <th>참여 인원수</th>
+                    <th>총 제작 수량</th>
+                    <th>인당 평균 제작량 (Avg)</th>
+                </tr>
+            </thead>
+            <tbody id="averageTableBody">
+                <tr><td colspan="4" style="text-align:center; padding:20px; color:#999;">데이터를 불러오는 중...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
         <h2>👤 담당자별 세부 실적 (캠페인 단위 소계)</h2>
         <table id="assigneeTable">
             <thead>
-                <tr>
-                    <th>팀</th>
-                    <th>담당자</th>
-                    <th>캠페인</th>
-                    <th>제작 수량</th>
-                </tr>
+                <tr><th>팀</th><th>담당자</th><th>캠페인</th><th>제작 수량</th></tr>
             </thead>
-            <tbody id="assigneeTableBody">
-                <tr><td colspan="4" style="text-align:center; padding:40px; color:#999;">데이터를 동기화해주세요.</td></tr>
-            </tbody>
+            <tbody id="assigneeTableBody"></tbody>
         </table>
     </div>
 </div>
@@ -133,7 +144,6 @@ async function loadSheetData() {
             const m = extractNum(r.c[2]?.v);
             const d = extractNum(r.c[3]?.v);
             if (y < 2000 || m < 1 || d < 1) return null;
-
             return {
                 team: r.c[0]?.v ? String(r.c[0].v) : "미지정",
                 date: new Date(y, m - 1, d),
@@ -157,7 +167,6 @@ function updateFilters() {
     const teams = new Set();
     const camps = new Set();
     allRawData.forEach(d => { teams.add(d.team); camps.add(d.campaign); });
-    
     tSel.innerHTML = '<option value="all">전체 팀 보기</option>';
     Array.from(teams).sort().forEach(t => tSel.innerHTML += `<option value="${t}">${t}</option>`);
     cSel.innerHTML = '<option value="all">전체 캠페인 보기</option>';
@@ -172,18 +181,18 @@ function processAndRender() {
     end.setHours(23, 59, 59);
 
     const daily = {}, teamStats = {}, campStats = {}, assigneeGroups = {};
+    const teamAssignees = {}; // 💡 팀별 유니크 인원 체크용
 
     allRawData.forEach(item => {
         if (item.date < start || item.date > end) return;
         if (sTeam !== 'all' && item.team !== sTeam) return;
         if (sCamp !== 'all' && item.campaign !== sCamp) return;
 
-        // 1. 일자별/팀별 집계
         const dKey = item.date.toISOString().split('T')[0];
         daily[dKey] = (daily[dKey] || 0) + 1;
         teamStats[item.team] = (teamStats[item.team] || 0) + 1;
 
-        // 2. 캠페인별 매체 집계
+        // 매체 집계
         if (!campStats[item.campaign]) campStats[item.campaign] = { t:0, m:0, k:0, y:0, g:0, n:0, e:0 };
         const cs = campStats[item.campaign];
         cs.t++;
@@ -196,20 +205,19 @@ function processAndRender() {
         if (MEDIA_MAP.naver.some(k => txt.includes(k))) { cs.n++; matched = true; }
         if (!matched) cs.e++;
 
-        // 3. 담당자별 상세 그룹화 (신규)
-        const tName = item.team;
-        const aName = item.assignee;
-        const cName = item.campaign;
+        // 담당자/팀별 인원 카운팅
+        if (!teamAssignees[item.team]) teamAssignees[item.team] = new Set();
+        teamAssignees[item.team].add(item.assignee);
 
-        if (!assigneeGroups[tName]) assigneeGroups[tName] = {};
-        if (!assigneeGroups[tName][aName]) assigneeGroups[tName][aName] = {};
-        assigneeGroups[tName][aName][cName] = (assigneeGroups[tName][aName][cName] || 0) + 1;
+        if (!assigneeGroups[item.team]) assigneeGroups[item.team] = {};
+        if (!assigneeGroups[item.team][item.assignee]) assigneeGroups[item.team][item.assignee] = {};
+        assigneeGroups[item.team][item.assignee][item.campaign] = (assigneeGroups[item.team][item.assignee][item.campaign] || 0) + 1;
     });
 
-    renderUI(daily, teamStats, campStats, assigneeGroups);
+    renderUI(daily, teamStats, campStats, assigneeGroups, teamAssignees);
 }
 
-function renderUI(daily, teams, camps, assigneeGroups) {
+function renderUI(daily, teams, camps, assigneeGroups, teamAssignees) {
     if (dailyChart) dailyChart.destroy();
     const lbls = Object.keys(daily).sort();
     dailyChart = new Chart(document.getElementById('dailyChart'), {
@@ -218,61 +226,63 @@ function renderUI(daily, teams, camps, assigneeGroups) {
         options: { maintainAspectRatio: false }
     });
 
-    // 팀 요약
+    // 1. 팀별 요약
     const tBody = document.getElementById('teamTableBody');
     tBody.innerHTML = '';
     Object.entries(teams).sort((a,b) => b[1]-a[1]).forEach(([n, c]) => tBody.innerHTML += `<tr><td>${n}</td><td><span class="badge">${c}건</span></td></tr>`);
 
-    // 캠페인 요약
+    // 2. 캠페인별 요약
     const cBody = document.getElementById('campaignTableBody');
     cBody.innerHTML = '';
     Object.entries(camps).sort((a,b) => b[1].t-a[1].t).forEach(([n, s]) => {
         cBody.innerHTML += `<tr><td><span class="badge">${n}</span></td><td><strong>${s.t}</strong></td><td>${s.m}</td><td>${s.k}</td><td>${s.y}</td><td>${s.g}</td><td>${s.n}</td><td>${s.e}</td></tr>`;
     });
 
-    // 💡 담당자별 상세 테이블 렌더링 (신규)
+    // 3. 💡 팀별 생산성 지표 (에버리지) 테이블 렌더링
+    const avgBody = document.getElementById('averageTableBody');
+    avgBody.innerHTML = '';
+    Object.keys(teamAssignees).sort().forEach(team => {
+        const memberCount = teamAssignees[team].size;
+        const totalQty = teams[team] || 0;
+        const average = memberCount > 0 ? (totalQty / memberCount).toFixed(1) : 0;
+        avgBody.innerHTML += `
+            <tr>
+                <td><strong>${team}</strong></td>
+                <td>${memberCount}명</td>
+                <td>${totalQty}건</td>
+                <td><span class="badge avg-badge">${average}건 / 인</span></td>
+            </tr>`;
+    });
+
+    // 4. 담당자별 상세 테이블
     const aBody = document.getElementById('assigneeTableBody');
     aBody.innerHTML = '';
-    
-    // 팀 -> 담당자 순으로 정렬하여 출력
     Object.keys(assigneeGroups).sort().forEach(team => {
         Object.keys(assigneeGroups[team]).sort().forEach(assignee => {
             let personTotal = 0;
             const campaigns = assigneeGroups[team][assignee];
-
-            // 해당 담당자의 캠페인별 행 추가
             Object.keys(campaigns).sort().forEach(camp => {
                 const qty = campaigns[camp];
                 personTotal += qty;
-                aBody.innerHTML += `
-                    <tr>
-                        <td>${team}</td>
-                        <td>${assignee}</td>
-                        <td>${camp}</td>
-                        <td>${qty}건</td>
-                    </tr>`;
+                aBody.innerHTML += `<tr><td>${team}</td><td>${assignee}</td><td>${camp}</td><td>${qty}건</td></tr>`;
             });
-
-            // 담당자 소계 행 추가
-            aBody.innerHTML += `
-                <tr class="subtotal-row">
-                    <td colspan="3" style="text-align:right;">[소계] ${assignee} 님 합계 :</td>
-                    <td>${personTotal}건</td>
-                </tr>`;
+            aBody.innerHTML += `<tr class="subtotal-row"><td colspan="3" style="text-align:right;">[소계] ${assignee} 님 합계 :</td><td>${personTotal}건</td></tr>`;
         });
     });
 }
 
 function exportFullExcel() {
     const wb = XLSX.utils.book_new();
-    // 시트 1: 캠페인별 분석
-    const ws1 = XLSX.utils.table_to_sheet(document.getElementById("campaignTable"));
-    XLSX.utils.book_append_sheet(wb, ws1, "캠페인별분석");
-    // 시트 2: 담당자별 상세
-    const ws2 = XLSX.utils.table_to_sheet(document.getElementById("assigneeTable"));
-    XLSX.utils.book_append_sheet(wb, ws2, "담당자별상세");
-    
-    XLSX.writeFile(wb, `제작통계_최종_${new Date().toISOString().split('T')[0]}.xlsx`);
+    const sheets = [
+        { id: "campaignTable", name: "캠페인별분석" },
+        { id: "averageTable", name: "팀별평균효율" },
+        { id: "assigneeTable", name: "담당자별상세" }
+    ];
+    sheets.forEach(s => {
+        const ws = XLSX.utils.table_to_sheet(document.getElementById(s.id));
+        XLSX.utils.book_append_sheet(wb, ws, s.name);
+    });
+    XLSX.writeFile(wb, `제작통계_통합리포트_${new Date().toISOString().split('T')[0]}.xlsx`);
 }
 </script>
 </body>
