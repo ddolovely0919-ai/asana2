@@ -8,30 +8,24 @@
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
-        :root { --primary: #4e73df; --bg: #f4f7fc; --card: #ffffff; --excel: #1d6f42; }
+        :root { --primary: #4e73df; --bg: #f4f7fc; --card: #ffffff; --excel: #1d6f42; --subtotal: #f8f9fc; }
         body { font-family: 'Pretendard', sans-serif; background: var(--bg); margin: 0; padding: 20px; color: #333; }
         .container { max-width: 1550px; margin: auto; }
         .card { background: var(--card); padding: 25px; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.05); margin-bottom: 25px; }
-        
-        /* 상단 필터 레이아웃 */
         .config-grid { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; flex-wrap: wrap; }
         .filter-inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; flex-grow: 1; }
         .input-group { display: flex; flex-direction: column; gap: 5px; }
         label { font-size: 12px; font-weight: bold; color: #666; }
         input, select { padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; outline: none; }
-        
         button { padding: 12px 20px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s; font-size: 14px; color: white; }
         .btn-sync { background: var(--primary); }
         .btn-excel { background: var(--excel); }
-        button:hover { opacity: 0.9; transform: translateY(-1px); }
-
-        /* 대시보드 메인 영역 */
         .dashboard-row { display: grid; grid-template-columns: 2.2fr 1fr; gap: 20px; margin-bottom: 20px; }
         .chart-container { height: 480px; position: relative; }
-
-        table { width: 100%; border-collapse: collapse; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 13px; }
         th { background: #f8f9fc; color: var(--primary); font-weight: 700; white-space: nowrap; }
+        .subtotal-row { background-color: var(--subtotal); font-weight: bold; color: #444; }
         .badge { display: inline-block; padding: 4px 8px; border-radius: 5px; background: #eef2ff; color: var(--primary); font-weight: bold; }
         #status { font-weight: bold; margin-top: 15px; padding: 12px; border-radius: 8px; background: #fff; border: 1px solid #eee; font-size: 14px; }
     </style>
@@ -40,7 +34,7 @@
 
 <div class="container">
     <div class="card">
-        <h2 style="margin-top:0;">📊 제작 물량 통합 트래킹 (매체 자동 분류형)</h2>
+        <h2 style="margin-top:0;">📊 제작 물량 통합 트래킹 (담당자별 리포트 강화)</h2>
         <div class="config-grid">
             <div class="filter-inputs">
                 <div class="input-group"><label>팀 필터</label><select id="teamSelect" onchange="processAndRender()"><option value="all">전체 팀 보기</option></select></div>
@@ -50,7 +44,7 @@
             </div>
             <div style="display:flex; gap:10px;">
                 <button class="btn-sync" onclick="loadSheetData()">🔄 DB 데이터 동기화</button>
-                <button class="btn-excel" onclick="exportToExcel()">📥 Excel 다운로드</button>
+                <button class="btn-excel" onclick="exportFullExcel()">📥 Excel 다운로드</button>
             </div>
         </div>
         <div id="status">연동 정보를 확인 중입니다...</div>
@@ -58,31 +52,39 @@
 
     <div class="dashboard-row">
         <div class="card">
-            <h2>📈 제작 요청 추이 (Hover 상세 정보)</h2>
+            <h2>📈 제작 요청 추이</h2>
             <div class="chart-container"><canvas id="dailyChart"></canvas></div>
         </div>
         <div class="card">
-            <h2>🏢 팀별 제작 요약</h2>
+            <h2>🏢 팀별 요약</h2>
             <table><thead><tr><th>팀명</th><th>총 제작 건수</th></tr></thead><tbody id="teamTableBody"></tbody></table>
         </div>
     </div>
 
     <div class="card">
-        <h2>📊 캠페인별 순위 및 매체 자동 분류 (fb, ig, bizboard 등 인식)</h2>
+        <h2>📊 캠페인별 매체 분석</h2>
         <table id="campaignTable">
             <thead>
-                <tr>
-                    <th>캠페인명</th>
-                    <th>총 건수</th>
-                    <th>메타(Meta)</th>
-                    <th>카카오(Kakao)</th>
-                    <th>유튜브(YT)</th>
-                    <th>구글(GDN)</th>
-                    <th>네이버</th>
-                    <th>기타</th>
-                </tr>
+                <tr><th>캠페인명</th><th>총 건수</th><th>메타</th><th>카카오</th><th>유튜브</th><th>구글</th><th>네이버</th><th>기타</th></tr>
             </thead>
             <tbody id="campaignTableBody"></tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>👤 담당자별 세부 실적 (캠페인 단위 소계)</h2>
+        <table id="assigneeTable">
+            <thead>
+                <tr>
+                    <th>팀</th>
+                    <th>담당자</th>
+                    <th>캠페인</th>
+                    <th>제작 수량</th>
+                </tr>
+            </thead>
+            <tbody id="assigneeTableBody">
+                <tr><td colspan="4" style="text-align:center; padding:40px; color:#999;">데이터를 동기화해주세요.</td></tr>
+            </tbody>
         </table>
     </div>
 </div>
@@ -92,15 +94,13 @@ Chart.register(ChartDataLabels);
 const SHEET_ID = '1lx3nUPiUlBXcZAOktrTQ87Dm0amoQw1O-iVvBAGGiN4';
 let allRawData = [];
 let dailyChart;
-let dailyDetails = {};
 
-// 💡 매체 분류 사전 (필요시 단어를 추가하세요)
 const MEDIA_MAP = {
-    meta: ['메타', 'meta', 'fb', 'ig', 'facebook', 'instagram', '페북', '인스타', '페이스북', '인스타그램'],
-    kakao: ['카카오', 'kakao', '비즈보드', 'bizboard', '모먼트', 'moment'],
-    google: ['구글', 'google', 'gdn', 'gads', 'ac', 'uac'],
-    youtube: ['유튜브', 'youtube', 'yt', '버티컬', '숏츠', 'shorts'],
-    naver: ['네이버', 'naver', 'gfa', 'nts', '성과형', '쇼핑검색', '파워링크']
+    meta: ['메타', 'meta', 'fb', 'ig', 'facebook', 'instagram', '페북', '인스타'],
+    kakao: ['카카오', 'kakao', '비즈보드', 'bizboard', '모먼트'],
+    google: ['구글', 'google', 'gdn', 'gads', 'ac'],
+    youtube: ['유튜브', 'youtube', 'yt', '숏츠'],
+    naver: ['네이버', 'naver', 'gfa', '파워링크']
 };
 
 function extractNum(str) {
@@ -117,17 +117,13 @@ window.onload = () => {
 
 async function loadSheetData() {
     const statusEl = document.getElementById('status');
-    statusEl.innerText = "📡 데이터를 긁어오는 중...";
-    statusEl.style.color = "#4e73df";
-
+    statusEl.innerText = "📡 데이터를 동기화 중...";
     const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=0`;
 
     try {
         const res = await fetch(url);
         const text = await res.text();
         const match = text.match(/google\.visualization\.Query\.setResponse\((.*)\);/);
-        
-        if (!match) throw new Error("시트 접근 오류");
         const json = JSON.parse(match[1]);
         const rows = json.table.rows;
 
@@ -136,7 +132,6 @@ async function loadSheetData() {
             const y = extractNum(r.c[1]?.v);
             const m = extractNum(r.c[2]?.v);
             const d = extractNum(r.c[3]?.v);
-            
             if (y < 2000 || m < 1 || d < 1) return null;
 
             return {
@@ -150,11 +145,9 @@ async function loadSheetData() {
 
         updateFilters();
         statusEl.innerText = `✅ 동기화 완료 (${allRawData.length}건 로드됨)`;
-        statusEl.style.color = "#1cc88a";
         processAndRender();
     } catch (e) {
-        statusEl.innerText = `❌ 오류: 시트 공유 설정(웹에 게시)을 확인하세요.`;
-        statusEl.style.color = "#e74a3b";
+        statusEl.innerText = `❌ 시트 연결 오류`;
     }
 }
 
@@ -178,80 +171,108 @@ function processAndRender() {
     const sCamp = document.getElementById('campaignSelect').value;
     end.setHours(23, 59, 59);
 
-    const daily = {}, teamStats = {}, campStats = {};
-    dailyDetails = {};
+    const daily = {}, teamStats = {}, campStats = {}, assigneeGroups = {};
 
     allRawData.forEach(item => {
         if (item.date < start || item.date > end) return;
         if (sTeam !== 'all' && item.team !== sTeam) return;
         if (sCamp !== 'all' && item.campaign !== sCamp) return;
 
+        // 1. 일자별/팀별 집계
         const dKey = item.date.toISOString().split('T')[0];
         daily[dKey] = (daily[dKey] || 0) + 1;
-        
-        if (!dailyDetails[dKey]) dailyDetails[dKey] = {};
-        const detKey = `${item.campaign} (${item.assignee})`;
-        dailyDetails[dKey][detKey] = (dailyDetails[dKey][detKey] || 0) + 1;
-
         teamStats[item.team] = (teamStats[item.team] || 0) + 1;
 
+        // 2. 캠페인별 매체 집계
         if (!campStats[item.campaign]) campStats[item.campaign] = { t:0, m:0, k:0, y:0, g:0, n:0, e:0 };
-        const s = campStats[item.campaign];
-        s.t++;
-
-        // 💡 매체 자동 분류 로직
+        const cs = campStats[item.campaign];
+        cs.t++;
         const txt = item.taskName.toLowerCase();
         let matched = false;
-        if (MEDIA_MAP.meta.some(k => txt.includes(k))) { s.m++; matched = true; }
-        if (MEDIA_MAP.kakao.some(k => txt.includes(k))) { s.k++; matched = true; }
-        if (MEDIA_MAP.youtube.some(k => txt.includes(k))) { s.y++; matched = true; }
-        if (MEDIA_MAP.google.some(k => txt.includes(k))) { s.g++; matched = true; }
-        if (MEDIA_MAP.naver.some(k => txt.includes(k))) { s.n++; matched = true; }
-        if (!matched) s.e++;
+        if (MEDIA_MAP.meta.some(k => txt.includes(k))) { cs.m++; matched = true; }
+        if (MEDIA_MAP.kakao.some(k => txt.includes(k))) { cs.k++; matched = true; }
+        if (MEDIA_MAP.youtube.some(k => txt.includes(k))) { cs.y++; matched = true; }
+        if (MEDIA_MAP.google.some(k => txt.includes(k))) { cs.g++; matched = true; }
+        if (MEDIA_MAP.naver.some(k => txt.includes(k))) { cs.n++; matched = true; }
+        if (!matched) cs.e++;
+
+        // 3. 담당자별 상세 그룹화 (신규)
+        const tName = item.team;
+        const aName = item.assignee;
+        const cName = item.campaign;
+
+        if (!assigneeGroups[tName]) assigneeGroups[tName] = {};
+        if (!assigneeGroups[tName][aName]) assigneeGroups[tName][aName] = {};
+        assigneeGroups[tName][aName][cName] = (assigneeGroups[tName][aName][cName] || 0) + 1;
     });
 
-    renderUI(daily, teamStats, campStats);
+    renderUI(daily, teamStats, campStats, assigneeGroups);
 }
 
-function renderUI(daily, teams, camps) {
+function renderUI(daily, teams, camps, assigneeGroups) {
     if (dailyChart) dailyChart.destroy();
     const lbls = Object.keys(daily).sort();
     dailyChart = new Chart(document.getElementById('dailyChart'), {
         type: 'line',
-        data: { labels: lbls, datasets: [{ label: '제작 건수', data: lbls.map(l => daily[l]), borderColor: '#4e73df', backgroundColor: 'rgba(78, 115, 223, 0.1)', fill: true, tension: 0.1 }] },
-        options: {
-            maintainAspectRatio: false,
-            plugins: {
-                datalabels: { display: true, align: 'top', font: { weight: 'bold' } },
-                tooltip: {
-                    callbacks: {
-                        footer: (ti) => {
-                            const details = dailyDetails[ti[0].label];
-                            if (!details) return '';
-                            let text = '\n[상세 정보]\n';
-                            Object.entries(details).sort((a,b) => b[1]-a[1]).slice(0, 8).forEach(([k, v]) => text += `• ${k}: ${v}건\n`);
-                            return text;
-                        }
-                    }
-                }
-            }
-        }
+        data: { labels: lbls, datasets: [{ label: '제작 건수', data: lbls.map(l => daily[l]), borderColor: '#4e73df', fill: true, tension: 0.1 }] },
+        options: { maintainAspectRatio: false }
     });
 
+    // 팀 요약
     const tBody = document.getElementById('teamTableBody');
     tBody.innerHTML = '';
-    Object.entries(teams).sort((a,b) => b[1]-a[1]).forEach(([n, c]) => tBody.innerHTML += `<tr><td><strong>${n}</strong></td><td><span class="badge">${c}건</span></td></tr>`);
+    Object.entries(teams).sort((a,b) => b[1]-a[1]).forEach(([n, c]) => tBody.innerHTML += `<tr><td>${n}</td><td><span class="badge">${c}건</span></td></tr>`);
 
+    // 캠페인 요약
     const cBody = document.getElementById('campaignTableBody');
     cBody.innerHTML = '';
     Object.entries(camps).sort((a,b) => b[1].t-a[1].t).forEach(([n, s]) => {
         cBody.innerHTML += `<tr><td><span class="badge">${n}</span></td><td><strong>${s.t}</strong></td><td>${s.m}</td><td>${s.k}</td><td>${s.y}</td><td>${s.g}</td><td>${s.n}</td><td>${s.e}</td></tr>`;
     });
+
+    // 💡 담당자별 상세 테이블 렌더링 (신규)
+    const aBody = document.getElementById('assigneeTableBody');
+    aBody.innerHTML = '';
+    
+    // 팀 -> 담당자 순으로 정렬하여 출력
+    Object.keys(assigneeGroups).sort().forEach(team => {
+        Object.keys(assigneeGroups[team]).sort().forEach(assignee => {
+            let personTotal = 0;
+            const campaigns = assigneeGroups[team][assignee];
+
+            // 해당 담당자의 캠페인별 행 추가
+            Object.keys(campaigns).sort().forEach(camp => {
+                const qty = campaigns[camp];
+                personTotal += qty;
+                aBody.innerHTML += `
+                    <tr>
+                        <td>${team}</td>
+                        <td>${assignee}</td>
+                        <td>${camp}</td>
+                        <td>${qty}건</td>
+                    </tr>`;
+            });
+
+            // 담당자 소계 행 추가
+            aBody.innerHTML += `
+                <tr class="subtotal-row">
+                    <td colspan="3" style="text-align:right;">[소계] ${assignee} 님 합계 :</td>
+                    <td>${personTotal}건</td>
+                </tr>`;
+        });
+    });
 }
 
-function exportToExcel() {
-    const wb = XLSX.utils.table_to_book(document.getElementById("campaignTable"));
-    XLSX.writeFile(wb, `제작통계_${new Date().toISOString().split('T')[0]}.xlsx`);
+function exportFullExcel() {
+    const wb = XLSX.utils.book_new();
+    // 시트 1: 캠페인별 분석
+    const ws1 = XLSX.utils.table_to_sheet(document.getElementById("campaignTable"));
+    XLSX.utils.book_append_sheet(wb, ws1, "캠페인별분석");
+    // 시트 2: 담당자별 상세
+    const ws2 = XLSX.utils.table_to_sheet(document.getElementById("assigneeTable"));
+    XLSX.utils.book_append_sheet(wb, ws2, "담당자별상세");
+    
+    XLSX.writeFile(wb, `제작통계_최종_${new Date().toISOString().split('T')[0]}.xlsx`);
 }
 </script>
 </body>
