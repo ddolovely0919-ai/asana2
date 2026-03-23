@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>제작 물량 통합 트래킹 (MadUp DB)</title>
+    <title>Asana 제작 트래킹 (날짜 조합형)</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -26,18 +26,18 @@
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 13px; }
         th { background: #f8f9fc; color: var(--primary); font-weight: 700; white-space: nowrap; }
         .badge { display: inline-block; padding: 4px 8px; border-radius: 5px; background: #eef2ff; color: var(--primary); font-weight: bold; }
-        #status { font-weight: bold; margin-top: 15px; padding: 10px; border-radius: 8px; background: #fff; border: 1px solid #eee; font-size: 14px; min-height: 20px; }
+        #status { font-weight: bold; margin-top: 15px; padding: 12px; border-radius: 8px; background: #fff; border: 1px solid #eee; font-size: 14px; }
     </style>
 </head>
 <body>
 
 <div class="container">
     <div class="card">
-        <h2 style="margin-top:0;">📊 제작 물량 통합 트래킹 (스프레드시트 DB형)</h2>
+        <h2 style="margin-top:0;">📊 제작 물량 통합 트래킹 (B/C/D 날짜 조합형)</h2>
         <div class="config-grid">
             <div class="filter-inputs">
                 <div class="input-group"><label>팀 필터</label><select id="teamSelect" onchange="processAndRender()"><option value="all">전체 팀</option></select></div>
-                <div class="input-group"><label>캠페인 필터</label><select id="campaignSelect" onchange="processAndRender()"><option value="all">전체 캠페인 보기</option></select></div>
+                <div class="input-group"><label>캠페인 필터</label><select id="campaignSelect" onchange="processAndRender()"><option value="all">전체 캠페인</option></select></div>
                 <div class="input-group"><label>시작일</label><input type="date" id="startDate" onchange="processAndRender()"></div>
                 <div class="input-group"><label>종료일</label><input type="date" id="endDate" onchange="processAndRender()"></div>
             </div>
@@ -46,7 +46,7 @@
                 <button class="btn-excel" onclick="exportToExcel()">📥 Excel 다운로드</button>
             </div>
         </div>
-        <div id="status">연동 정보를 확인 중입니다...</div>
+        <div id="status">데이터를 불러오는 중입니다...</div>
     </div>
 
     <div class="dashboard-row">
@@ -61,16 +61,16 @@
     </div>
 
     <div class="card">
-        <h2>📊 전체 캠페인 순위 및 매체별 수량 분석</h2>
+        <h2>📊 전체 캠페인 순위 및 매체별 상세 수량</h2>
         <table id="campaignTable">
             <thead>
                 <tr>
                     <th>캠페인명</th>
                     <th>총 건수</th>
-                    <th>메타(Meta)</th>
-                    <th>카카오(Kakao)</th>
-                    <th>유튜브(YT)</th>
-                    <th>구글(GDN)</th>
+                    <th>메타</th>
+                    <th>카카오</th>
+                    <th>유튜브</th>
+                    <th>구글</th>
                     <th>네이버</th>
                     <th>기타</th>
                 </tr>
@@ -82,11 +82,17 @@
 
 <script>
 Chart.register(ChartDataLabels);
-// 💡 시트 ID 확인 필수: 1lx3nUPiUlBXcZAOktrTQ87Dm0amoQw1O-iVvBAGGiN4
-const SHEET_ID = '1lx3nUPiUlBXcZAOktrTQ87Dm0amoQw1O-iVvBAGGiN4'; 
+const SHEET_ID = '1lx3nUPiUlBXcZAOktrTQ87Dm0amoQw1O-iVvBAGGiN4';
 let allRawData = [];
 let dailyChart;
 let dailyDetails = {};
+
+// 헬퍼 함수: "2026년" 같은 문자열에서 숫자만 추출
+function extractNumber(str) {
+    if (!str) return 0;
+    const num = String(str).replace(/[^0-9]/g, '');
+    return num ? parseInt(num) : 0;
+}
 
 window.onload = () => {
     document.getElementById('startDate').value = "2026-02-01";
@@ -96,55 +102,49 @@ window.onload = () => {
 
 async function loadSheetData() {
     const statusEl = document.getElementById('status');
-    statusEl.innerText = "📡 데이터를 긁어오는 중...";
+    statusEl.innerText = "📡 시트 DB 연결 중...";
     statusEl.style.color = "#4e73df";
 
-    // 구글 시트 JSON 엔드포인트
     const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=0`;
 
     try {
         const res = await fetch(url);
         const text = await res.text();
-        
-        // 구글 응답 텍스트 파싱
         const match = text.match(/google\.visualization\.Query\.setResponse\((.*)\);/);
-        if (!match) {
-            throw new Error("데이터 형식을 읽을 수 없습니다. '웹에 게시' 설정을 확인하세요.");
-        }
-
+        
+        if (!match) throw new Error("시트 데이터를 읽지 못했습니다.");
         const json = JSON.parse(match[1]);
-        if (json.status === "error") {
-            throw new Error("구글 시트 오류: " + json.errors[0].detailed_message);
-        }
-
         const rows = json.table.rows;
-        allRawData = rows.map(r => {
-            if (!r.c || !r.c[4] || !r.c[4].v) return null;
-            const fullTaskName = String(r.c[4].v);
-            const dateMatch = fullTaskName.match(/^(\d{6})/);
-            if (!dateMatch) return null;
+
+        allRawData = rows.map((r, idx) => {
+            if (!r.c) return null;
+            
+            // 💡 컬럼 매핑 기반 (A:0, B:1, C:2, D:3, E:4, F:5, G:6)
+            const year = extractNumber(r.c[1]?.v);
+            const month = extractNumber(r.c[2]?.v);
+            const day = extractNumber(r.c[3]?.v);
+            
+            // 유효한 날짜 숫자가 없으면 건너뜀
+            if (year < 2000 || month < 1 || month > 12 || day < 1 || day > 31) return null;
 
             return {
-                team: r.c[0] ? String(r.c[0].v) : "미지정",
-                dateRaw: dateMatch[1],
-                taskName: fullTaskName,
-                assignee: r.c[5] ? String(r.c[5].v) : "미지정",
-                campaign: r.c[6] ? String(r.c[6].v) : "기타"
+                team: r.c[0]?.v ? String(r.c[0].v) : "미지정",
+                year: year,
+                month: month,
+                day: day,
+                taskName: r.c[4]?.v ? String(r.c[4].v) : "",
+                assignee: r.c[5]?.v ? String(r.c[5].v) : "미지정",
+                campaign: r.c[6]?.v ? String(r.c[6].v) : "기타"
             };
         }).filter(item => item !== null);
-
-        if (allRawData.length === 0) {
-            throw new Error("동기화는 성공했으나 유효한 데이터(YYMMDD 형식)가 없습니다.");
-        }
 
         updateFilters();
         statusEl.innerText = `✅ 동기화 완료 (${allRawData.length}건 로드됨)`;
         statusEl.style.color = "#1cc88a";
         processAndRender();
     } catch (e) {
-        statusEl.innerText = `❌ 오류: ${e.message}`;
+        statusEl.innerText = `❌ 오류 발생: ${e.message}`;
         statusEl.style.color = "#e74a3b";
-        console.error("Debug Details:", e);
     }
 }
 
@@ -154,30 +154,39 @@ function updateFilters() {
     const teams = new Set();
     const camps = new Set();
     allRawData.forEach(d => { teams.add(d.team); camps.add(d.campaign); });
+    
     tSel.innerHTML = '<option value="all">전체 팀</option>';
     Array.from(teams).sort().forEach(t => tSel.innerHTML += `<option value="${t}">${t}</option>`);
-    cSel.innerHTML = '<option value="all">전체 캠페인 보기</option>';
+    cSel.innerHTML = '<option value="all">전체 캠페인</option>';
     Array.from(camps).sort().forEach(c => cSel.innerHTML += `<option value="${c}">${c}</option>`);
 }
 
 function processAndRender() {
-    const start = new Date(document.getElementById('startDate').value);
-    const end = new Date(document.getElementById('endDate').value);
+    const startVal = document.getElementById('startDate').value;
+    const endVal = document.getElementById('endDate').value;
+    if(!startVal || !endVal) return;
+
+    const start = new Date(startVal);
+    const end = new Date(endVal);
+    end.setHours(23, 59, 59);
+
     const sTeam = document.getElementById('teamSelect').value;
     const sCamp = document.getElementById('campaignSelect').value;
-    end.setHours(23, 59, 59);
 
     const daily = {}, teamStats = {}, campStats = {};
     dailyDetails = {};
 
     allRawData.forEach(item => {
-        const dObj = new Date(`20${item.dateRaw.substring(0,2)}-${item.dateRaw.substring(2,4)}-${item.dateRaw.substring(4,6)}`);
+        // 💡 B, C, D열 숫자로 날짜 객체 생성
+        const dObj = new Date(item.year, item.month - 1, item.day);
+
         if (dObj < start || dObj > end) return;
         if (sTeam !== 'all' && item.team !== sTeam) return;
         if (sCamp !== 'all' && item.campaign !== sCamp) return;
 
         const dKey = dObj.toISOString().split('T')[0];
         daily[dKey] = (daily[dKey] || 0) + 1;
+        
         if (!dailyDetails[dKey]) dailyDetails[dKey] = {};
         const detailKey = `${item.campaign} (${item.assignee})`;
         dailyDetails[dKey][detailKey] = (dailyDetails[dKey][detailKey] || 0) + 1;
@@ -205,7 +214,24 @@ function renderUI(daily, teams, camps) {
     dailyChart = new Chart(document.getElementById('dailyChart'), {
         type: 'line',
         data: { labels: lbls, datasets: [{ label: '제작 건수', data: lbls.map(l => daily[l]), borderColor: '#4e73df', backgroundColor: 'rgba(78, 115, 223, 0.1)', fill: true, tension: 0.1 }] },
-        options: { maintainAspectRatio: false, plugins: { datalabels: { display: true, align: 'top' } } }
+        options: {
+            maintainAspectRatio: false,
+            plugins: {
+                datalabels: { display: true, align: 'top', font: { weight: 'bold' } },
+                tooltip: {
+                    callbacks: {
+                        footer: (tooltipItems) => {
+                            const date = tooltipItems[0].label;
+                            const details = dailyDetails[date];
+                            if (!details) return '';
+                            let text = '\n[일자별 상세]\n';
+                            Object.entries(details).sort((a,b) => b[1]-a[1]).slice(0, 10).forEach(([k, c]) => text += `• ${k}: ${c}건\n`);
+                            return text;
+                        }
+                    }
+                }
+            }
+        }
     });
 
     const tBody = document.getElementById('teamTableBody');
