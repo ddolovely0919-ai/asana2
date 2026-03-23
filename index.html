@@ -132,7 +132,7 @@ async function loadSheetData() {
     statusEl.innerText = "📡 스프레드시트 DB 동기화 중...";
     statusEl.style.color = var(--primary);
 
-    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&${SHEET_NAME}`;
+    const url = `https://docs.google.com/spreadsheets/d/1lx3nUPiUlBXcZAOktrTQ87Dm0amoQw1O-iVvBAGGiN4/gviz/tq?tqx=out:json&${시트1}`;
 
     try {
         const res = await fetch(url);
