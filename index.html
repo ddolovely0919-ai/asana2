@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>제작 물량 통합 트래킹 대시보드 (SS DB)</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        :root { --primary: #4e73df; --bg: #f4f7fc; --card: #ffffff; --excel: #217346; }
+        body { font-family: 'Pretendard', sans-serif; background: var(--bg); margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 1500px; margin: auto; }
+        .card { background: var(--card); padding: 25px; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.05); margin-bottom: 25px; }
+        
+        /* 설정 섹션 레이아웃 */
+        .config-grid { display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: center; }
+        .filter-inputs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; flex-grow: 1; }
+        .input-group { display: flex; flex-direction: column; gap: 5px; }
+        label { font-size: 12px; font-weight: bold; color: #666; }
+        input, select { padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; outline: none; }
+        
+        button { padding: 12px 20px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s; font-size: 14px; }
+        .btn-sync { background: var(--primary); color: white; margin-right: 10px; }
+        .btn-excel { background: var(--excel); color: white; }
+        button:hover { opacity: 0.9; transform: translateY(-1px); }
+
+        /* 대시보드 레이아웃 */
+        .dashboard-row { display: grid; grid-template-columns: 2.3fr 1fr; gap: 20px; margin-bottom: 20px; }
+        .chart-container { height: 450px; position: relative; }
+
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 13px; }
+        th { background: #f8f9fc; color: var(--primary); font-weight: 700; white-space: nowrap; }
+        td a { color: var(--primary); text-decoration: none; font-weight: bold; }
+        .badge { display: inline-block; padding: 4px 8px; border-radius: 5px; background: #eef2ff; color: var(--primary); font-weight: bold; }
+        #status { font-weight: bold; color: var(--primary); margin-top: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="card">
+        <h2 style="margin-top:0;">📊 제작 물량 통합 트래킹 (스프레드시트 DB형)</h2>
+        <div class="config-grid">
+            <div class="filter-inputs">
+                <div class="input-group">
+                    <label>팀 선택 필터</label>
+                    <select id="teamSelect" onchange="processAndRender()">
+                        <option value="all">전체 팀 보기</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label>캠페인 선택 필터</label>
+                    <select id="campaignSelect" onchange="processAndRender()">
+                        <option value="all">전체 캠페인 보기</option>
+                    </select>
+                </div>
+                <div class="input-group" style="grid-column: span 2;">
+                    <label>기간 설정 (시작일 ~ 종료일)</label>
+                    <div style="display:flex; gap:5px; align-items:center;">
+                        <input type="date" id="startDate" onchange="processAndRender()">
+                        <span>~</span>
+                        <input type="date" id="endDate" onchange="processAndRender()">
+                    </div>
+                </div>
+            </div>
+            <div>
+                <button class="btn-sync" onclick="loadSheetData()">🔄 DB 데이터 동기화</button>
+                <button class="btn-excel" onclick="exportToExcel()">📥 Excel 다운로드</button>
+            </div>
+        </div>
+        <div id="status">DB 데이터를 동기화해주세요.</div>
+    </div>
+
+    <div class="dashboard-row">
+        <div class="card">
+            <h2>📈 제작 요청 추이 (Hover 시 담당자/캠페인 상세)</h2>
+            <div class="chart-container"><canvas id="dailyChart"></canvas></div>
+        </div>
+        <div class="card">
+            <h2>🏢 팀별 요약 현황</h2>
+            <table id="teamTable">
+                <thead><tr><th>팀명</th><th>제작 건수</th></tr></thead>
+                <tbody id="teamTableBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>📊 전체 캠페인 순위 및 매체별 세부 수량 분석</h2>
+        <table id="campaignTable">
+            <thead>
+                <tr>
+                    <th>캠페인명</th>
+                    <th>총 건수</th>
+                    <th>구글(GDN)</th>
+                    <th>메타(Meta)</th>
+                    <th>카카오(Kakao)</th>
+                    <th>유튜브(YT)</th>
+                    <th>네이버</th>
+                    <th>기타</th>
+                </tr>
+            </thead>
+            <tbody id="campaignTableBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+Chart.register(ChartDataLabels);
+
+// ⚠️ 구글 스프레드시트 설정 (제공해주신 정보 기반)
+const SHEET_ID = '1lx3nUPiUlBXcZAOktrTQ87Dm0amoQw1O-iVvBAGGiN4';
+const SHEET_NAME = 'gid=0'; // 첫 번째 시트
+
+let allRawData = []; // DB 전체 데이터 저장
+let dailyChart;
+let dailyTooltipDetails = {}; // 날짜별 상세 담당자 정보 저장
+
+// 페이지 로드 시 날짜 초기화 및 자동 동기화
+window.onload = () => {
+    const now = new Date();
+    document.getElementById('startDate').value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    document.getElementById('endDate').value = now.toISOString().split('T')[0];
+    loadSheetData(); // 자동 동기화 시작
+};
+
+// 1. 구글 스프레드시트 데이터 불러오기
+async function loadSheetData() {
+    const statusEl = document.getElementById('status');
+    statusEl.innerText = "📡 스프레드시트 DB 동기화 중...";
+    statusEl.style.color = var(--primary);
+
+    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&${SHEET_NAME}`;
+
+    try {
+        const res = await fetch(url);
+        const text = await res.text();
+        
+        // 구글 Viz API의 JSON 응답을 파싱 가능한 형태로 변환
+        const jsonString = text.substring(47).slice(0, -2);
+        const json = JSON.parse(jsonString);
+        
+        // 제공된 컬럼 구조에 맞게 데이터 매핑
+        // 컬럼 순서: 0:팀, 1:YYYY년M월D일(표기용), 2:YYMMDD_테스크명, 3:담당자, 4:태그(수량?), 5:링크
+        allRawData = json.table.rows.map(row => {
+            // 태스크명 컬럼에서 YYMMDD와 실제 테스크명을 분리
+            const fullName = row.c[2] ? row.c[2].v : "";
+            const nameParts = fullName.split('_');
+            const dateStr = nameParts[0] ? nameParts[0].trim() : "";
+            const taskBody = nameParts.slice(1).join('_').trim();
+
+            return {
+                team: row.c[0] ? row.c[0].v : "미지정",
+                dateRaw: dateStr, // YYMMDD 형식
+                taskName: taskBody,
+                fullName: fullName,
+                assignee: row.c[3] ? row.c[3].v : "미지정",
+                // 수량: 현재 시트에 '태그' 컬럼 데이터가 3, 2등으로 표기됨 -> 수량으로 가정. 없으면 1.
+                quantity: (row.c[4] && row.c[4].v && !isNaN(row.c[4].v)) ? parseInt(row.c[4].v) : 1,
+                link: row.c[5] ? row.c[5].v : "#"
+            };
+        });
+
+        // 헤더 행 제외 (데이터가 첫 번째 행부터 시작한다고 가정)
+        if (allRawData.length > 0 && allRawData[0].dateRaw === "YYMMDD") {
+            allRawData.shift(); 
+        }
+
+        updateDropdowns();
+        statusEl.innerText = `✅ DB 동기화 완료! (총 ${allRawData.length}건 데이터 수집됨)`;
+        statusEl.style.color = "#1cc88a";
+        processAndRender();
+
+    } catch (e) {
+        statusEl.innerText = "❌ DB 동기화 실패 (권한 설정 또는 URL을 확인하세요)";
+        statusEl.style.color = "#e74a3b";
+        console.error("Error loading sheet data:", e);
+    }
+}
+
+// 2. 드롭다운 필터 생성 (팀, 캠페인)
+function updateDropdowns() {
+    const teamSelect = document.getElementById('teamSelect');
+    const campaignSelect = document.getElementById('campaignSelect');
+    
+    const teams = new Set();
+    const campaigns = new Set();
+    
+    allRawData.forEach(item => {
+        if(item.team) teams.add(item.team);
+        
+        // 테스크명에서 캠페인명 추출 (YYMMDD_캠페인명_... 구조 기반)
+        if (item.taskName) {
+            const campName = item.taskName.split('_')[0]; // 첫 번째 언더바 앞
+            if (campName) campaigns.add(campName.trim());
+        }
+    });
+
+    // 기존 옵션 유지하고 추가
+    teamSelect.innerHTML = '<option value="all">전체 팀 보기</option>';
+    Array.from(teams).sort().forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t; opt.innerText = t; teamSelect.appendChild(opt);
+    });
+
+    campaignSelect.innerHTML = '<option value="all">전체 캠페인 보기</option>';
+    Array.from(campaigns).sort().forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c; opt.innerText = c; campaignSelect.appendChild(opt);
+    });
+}
+
+// 3. 필터링 및 데이터 집계
+function processAndRender() {
+    if (allRawData.length === 0) return;
+
+    const startVal = document.getElementById('startDate').value;
+    const endVal = document.getElementById('endDate').value;
+    const selectedTeam = document.getElementById('teamSelect').value;
+    const selectedCampaign = document.getElementById('campaignSelect').value;
+
+    if(!startVal || !endVal) return;
+    const start = new Date(startVal);
+    const end = new Date(endVal);
+    end.setHours(23, 59, 59, 999);
+
+    const dailyStats = {};
+    const teamStats = {};
+    const campaignStats = {};
+    dailyTooltipDetails = {}; // Hover용
+
+    allRawData.forEach(item => {
+        // 1. 날짜 파싱 (YYMMDD -> Date 객체)
+        if (!/^\d{6}$/.test(item.dateRaw)) return; // 6자리 숫자가 아니면 무시
+        
+        const y = parseInt("20" + item.dateRaw.substring(0, 2));
+        const m = parseInt(item.dateRaw.substring(2, 4)) - 1;
+        const d = parseInt(item.dateRaw.substring(4, 6));
+        const taskDate = new Date(y, m, d);
+
+        if (isNaN(taskDate.getTime())) return;
+
+        // 2. 조건 필터링
+        if (taskDate < start || taskDate > end) return;
+        if (selectedTeam !== 'all' && item.team !== selectedTeam) return;
+        
+        // 캠페인 파싱 (YYMMDD_캠페인명_... 구조)
+        const campaign = item.taskName ? item.taskName.split('_')[0].trim() : "미지정";
+        if (selectedCampaign !== 'all' && campaign !== selectedCampaign) return;
+
+        const dateKey = taskDate.toISOString().split('T')[0];
+        const qty = item.quantity;
+
+        // 3. 집계
+        // 일자별 수량
+        dailyStats[dateKey] = (dailyStats[dateKey] || 0) + qty;
+        
+        // Hover용 일자별 상세 정보 저장 (담당자-테스크-수량)
+        if (!dailyTooltipDetails[dateKey]) dailyTooltipDetails[dateKey] = [];
+        dailyTooltipDetails[dateKey].push(`${item.assignee}(${campaign}, ${qty}건)`);
+
+        // 팀별 수량
+        if(!teamStats[item.team]) teamStats[item.team] = 0;
+        teamStats[item.team] += qty;
+
+        // 캠페인 및 매체별 수량 분석 (테스크명 전체 텍스트 기반)
+        if (!campaignStats[campaign]) {
+            campaignStats[campaign] = { total: 0, google: 0, meta: 0, kakao: 0, youtube: 0, naver: 0, etc: 0 };
+        }
+        campaignStats[campaign].total += qty;
+        
+        const textToAnalyze = item.fullName.toLowerCase();
+        
+        if (textToAnalyze.includes('구글') || textToAnalyze.includes('google') || textToAnalyze.includes('gdn')) campaignStats[campaign].google += qty;
+        else if (textToAnalyze.includes('메타') || textToAnalyze.includes('meta')) campaignStats[campaign].meta += qty;
+        else if (textToAnalyze.includes('카카오') || textToAnalyze.includes('kakao')) campaignStats[campaign].kakao += qty;
+        else if (textToAnalyze.includes('유튜브') || textToAnalyze.includes('youtube') || textToAnalyze.includes('yt')) campaignStats[campaign].youtube += qty;
+        else if (textToAnalyze.includes('네이버') || textToAnalyze.includes('naver')) campaignStats[campaign].naver += qty;
+        else campaignStats[campaign].etc += qty;
+    });
+
+    renderUI(dailyStats, teamStats, campaignStats);
+}
+
+// 4. 차트 및 테이블 렌더링
+function renderUI(daily, teams, campaigns) {
+    // 그래프
+    if (dailyChart) dailyChart.destroy();
+    const labels = Object.keys(daily).sort();
+    
+    dailyChart = new Chart(document.getElementById('dailyChart'), {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{ 
+                label: '총 제작 종 수', data: labels.map(l => daily[l]), 
+                borderColor: '#4e73df', backgroundColor: 'rgba(78, 115, 223, 0.1)', fill: true, tension: 0.1, pointRadius: 5
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            plugins: {
+                datalabels: { display: true, align: 'top', font: { weight: 'bold' } },
+                tooltip: {
+                    callbacks: {
+                        footer: (tooltipItems) => {
+                            const date = tooltipItems[0].label;
+                            const details = dailyTooltipDetails[date];
+                            if (!details) return '';
+                            // 담당자별 합산
+                            const summary = {};
+                            details.forEach(d => { summary[d] = (summary[d] || 0) + 1; });
+                            
+                            let text = '\n[담당자/캠페인 상세]\n';
+                            Object.entries(details).slice(0, 10).forEach(([d, count]) => {
+                                text += `• ${d}\n`;
+                            });
+                            if(details.length > 10) text += `• 외 ${details.length - 10}건...`;
+                            return text;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // 팀별 표
+    const teamBody = document.getElementById('teamTableBody');
+    teamBody.innerHTML = '';
+    Object.entries(teams).sort((a,b) => b[1] - a[1]).forEach(([name, count]) => {
+        teamBody.innerHTML += `<tr><td><strong>${name}</strong></td><td><span class="badge">${count.toLocaleString()}건</span></td></tr>`;
+    });
+
+    // 캠페인/매체별 표
+    const campaignBody = document.getElementById('campaignTableBody');
+    campaignBody.innerHTML = '';
+    const totalCount = Object.values(campaigns).reduce((sum, obj) => sum + obj.total, 0);
+
+    Object.entries(campaigns).sort((a,b) => b[1].total - a[1].total).forEach(([name, stats]) => {
+        campaignBody.innerHTML += `
+            <tr>
+                <td><span class="badge">${name}</span></td>
+                <td><strong>${stats.total}건</strong></td>
+                <td>${stats.google}</td>
+                <td>${stats.meta}</td>
+                <td>${stats.kakao}</td>
+                <td>${stats.youtube}</td>
+                <td>${stats.naver}</td>
+                <td>${stats.etc}</td>
+            </tr>`;
+    });
+}
+
+// 5. 엑셀 다운로드 (필터링된 캠페인 테이블 기준)
+function exportToExcel() {
+    const table = document.getElementById("campaignTable");
+    const wb = XLSX.utils.table_to_book(table, { sheet: "Asana제작리포트" });
+    const today = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `Asana_제작통계_${today}.xlsx`);
+}
+</script>
+</body>
+</html>
